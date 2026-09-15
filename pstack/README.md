@@ -119,6 +119,7 @@ the full rules and playbooks live in [`skills/poteto-mode/SKILL.md`](./skills/po
 | [`/swarm`](./skills/swarm/SKILL.md) | you want N parallel workers across different slices or races, then one aggregated report. |
 | [`/interrogate`](./skills/interrogate/SKILL.md) | you have a diff and want several different models to try to break it, including a strict code-quality lens. |
 | [`/automate-me`](./skills/automate-me/SKILL.md) | you want your own `-mode` skill, drafted from how you've actually worked. |
+| [`/automate-maintainer`](./skills/automate-maintainer/SKILL.md) | you want a `<login>-maintainer` skill for someone else, mined from their PRs, code reviews, issues, and discussions on GitHub, scoped to a repo, an org, or global. |
 | [`/make-bot-ui`](./skills/make-bot-ui/SKILL.md) | you want a page or dashboard whose buttons wake a Grok Bot over a webhook, including the sender-key handoff and Tailscale. |
 | [`/setup-pstack`](./skills/setup-pstack/SKILL.md) | you want to pick which models pstack uses per role. detects your models and writes a config rule. |
 | [`/reflect`](./skills/reflect/SKILL.md) | a long task landed and you want the recipe captured as a skill edit. |
@@ -179,6 +180,7 @@ reflect:           /reflect that took too long. capture what we learned so the n
                    repeat it.
 show-me-your-work: /show-me-your-work keep a decision trail i can review when i'm back.
 automate-me:       /automate-me
+automate-maintainer: /automate-maintainer sokra on webpack/webpack. i want to review like he does.
 ```
 
 </details>

@@ -18,6 +18,16 @@ Run it again whenever your habits drift:
 
 Update mode mines only the history since the skill last changed. It keeps rules you haven't contradicted, revises the ones with new evidence, and adds sections only for genuinely new patterns.
 
+## Recreate a maintainer with `/automate-maintainer`
+
+```text
+/automate-maintainer sokra on webpack/webpack
+```
+
+Same idea, different subject and different evidence. [`/automate-maintainer`](../../skills/automate-maintainer/SKILL.md) takes a GitHub login and a scope (one repo, an org, or global) and runs its bundled `gh` script to dump that person's PRs, code reviews, issues, and discussions to JSONL. Subagents read one source each and return patterns with URL evidence. Rules that show up across sources become a `.cursor/skills/<login>-maintainer/SKILL.md` an agent can follow to review, triage, or answer the way that maintainer does in that codebase. The persona never posts as the person, and private-repo quotes stay out of skills that land in public repos.
+
+Unlike a self mode, this one has a test. The script holds back the maintainer's three newest reviews so the draft never sees them. Hand a fresh subagent the drafted skill and one of those PR diffs, then compare its review against the real one. A miss is a rule that's missing or too vague.
+
 ## Capture a session's lessons with `/reflect`
 
 Right after a task that taught you something, run:
