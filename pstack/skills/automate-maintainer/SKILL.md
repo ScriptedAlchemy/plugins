@@ -12,7 +12,15 @@ It orchestrates three things: the mining script in this skill's `scripts/`, Curs
 
 ## Inputs
 
-You need a GitHub login and a scope. Ask with `AskQuestion` if the user gave only one:
+You need a GitHub login and a scope. When the user gives neither, the scope is the repo of the current directory and the login comes from discovery:
+
+```bash
+<this skill dir>/scripts/list-maintainers.sh [owner/name]
+```
+
+It ranks the people behind the last 200 merged PRs by merges, then reviews, with authored-PR counts and a CODEOWNERS flag, bots removed. Present the top candidates with `AskQuestion` (`allow_multiple: true`, 4-6 options, each labelled `login (merged N, reviewed N)`), asking which maintainer or maintainers to automate. Drop obvious integrations the heuristic missed. One selected login runs the flow below once. Several run the mining for all of them in parallel and then the rest of the flow per login, producing one `<login>-maintainer` skill each.
+
+Ask with `AskQuestion` if the user gave only one of the two:
 
 - **Login.** The GitHub handle to recreate.
 - **Scope.** One repo (`--repo owner/name`), an owner (`--owner org`), or global (no flag). Repeat flags to widen. A maintainer's behavior is repo-specific, so prefer the narrowest scope that still yields a few hundred comments.

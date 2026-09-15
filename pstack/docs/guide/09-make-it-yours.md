@@ -8,7 +8,7 @@ poteto-mode is one person's style. The machinery underneath, playbooks, routing,
 /automate-me
 ```
 
-You don't describe your style, because [`/automate-me`](../../skills/automate-me/SKILL.md) reads it out of your history. It mines your recent transcripts in the active workspace for repeated preferences, in how you like replies, delegation, verification, code, prose, and process, then asks you which patterns are really you. It drafts `.cursor/skills/<your-name>-mode/SKILL.md` through Cursor's built-in `create-skill` flow, runs the draft through [`/unslop`](../../skills/unslop/SKILL.md), and opens a PR from a worktree so you review it like any other change.
+You don't describe your style, because [`/automate-me`](../../skills/automate-me/SKILL.md) reads it out of your history. It lists this project's transcripts across every agent tool that keeps them locally (Cursor, Claude Code, Codex, opencode, Kimi Code) and mines them for repeated preferences, in how you like replies, delegation, verification, code, prose, and process, then asks you which patterns are really you. It drafts `.cursor/skills/<your-name>-mode/SKILL.md` through Cursor's built-in `create-skill` flow, runs the draft through [`/unslop`](../../skills/unslop/SKILL.md), and opens a PR from a worktree so you review it like any other change.
 
 Run it again whenever your habits drift:
 
@@ -23,6 +23,8 @@ Update mode mines only the history since the skill last changed. It keeps rules 
 ```text
 /automate-maintainer sokra on webpack/webpack
 ```
+
+Or just `/automate-maintainer` inside a repo, and it ranks that repo's maintainers by merges and reviews and asks which one, or which several, to automate.
 
 Same idea, different subject and different evidence. [`/automate-maintainer`](../../skills/automate-maintainer/SKILL.md) takes a GitHub login and a scope (one repo, an org, or global) and runs its bundled `gh` script to dump that person's PRs, code reviews, issues, and discussions to JSONL. Subagents read one source each and return patterns with URL evidence. Rules that show up across sources become a `.cursor/skills/<login>-maintainer/SKILL.md` an agent can follow to review, triage, or answer the way that maintainer does in that codebase. The persona never posts as the person, and private-repo quotes stay out of skills that land in public repos.
 
