@@ -62,19 +62,17 @@ The user is not the subject here, so don't ask about the subject's style. Ask wh
 
 One free-form question at the end catches what the options missed.
 
-### 3. Cluster findings into mode sections
+### 3. Cluster findings into lean mode sections
 
-Group the combined signals into mode-skill sections, not a review taxonomy. Use only what the evidence supports:
+Group the combined signals into a short mode skill in the shape of **zack-mode**: lean imperative sections, ~60 lines total, not a review encyclopedia. Use only what the evidence supports:
 
-- **Non-negotiables.** Hard bars.
-- **Autonomy.** When to decide vs ask.
-- **Review & verify.** Merge bar and repro posture, as working conventions. A few non-negotiable bullets at most, never a verdict-model encyclopedia.
-- **Voice.** Length, tone, how they phrase a request vs a refusal. One or two short quotes with links.
-- **Process.** PR shape, commits, triage habits.
-- **Ownership.** Paths and subsystems where this mode applies.
-- **Refusals.** What they consistently decline, and how they say so.
+- **Verification.** What "mergeable" means here: merge bar, repro posture, what proof a change needs.
+- **Discipline.** The few hard bars and recurring asks, as rules. Cut verdict-model walls.
+- **Delegation and ownership.** When to decide vs ask; paths and subsystems where this mode applies.
+- **Replies.** Voice: lead with the outcome, how they phrase a request vs a refusal. One or two short quotes with links.
+- **Process.** PR shape, commits, triage habits, and what they consistently decline.
 
-The **poteto-mode** skill shows the shape. Read it for granularity. Don't copy its content.
+Short frontmatter, `# <Login> mode` heading, then sections only. Subtract before add.
 
 ### 4. Draft the skill
 
@@ -88,13 +86,13 @@ Use Cursor's built-in `create-skill` skill to author it. Placement and frontmatt
 - Frontmatter formatting: follow `create-skill`'s YAML rules. Keep `description` as one YAML scalar. Quote it or use `description: >-` with indented continuation lines when punctuation or wrapping requires it.
 - Frontmatter `disable-model-invocation: true` by default.
 
-Write rules in the imperative for the agent ("Block on missing tests for runtime changes"), not as biography ("<login> usually asks for tests"). Every non-obvious rule carries one evidence link.
+Write rules in the imperative for the agent ("Block on missing tests for runtime changes"), not as biography ("<login> usually asks for tests"). Every non-obvious rule carries one evidence link. Target ~60 lines for the whole skill. Cut anything that reads like a profile rather than an instruction.
 
 ### 5. Iterate on prose
 
 Apply the **unslop** skill and `create-skill`'s writing guidelines to every line.
 
-Show the draft to the user and take feedback. Expect multiple iterations. Cut ruthlessly. A mode skill is not a manual. Cut anything that reads like a profile rather than an instruction.
+Show the draft to the user and take feedback. Expect multiple iterations. Cut ruthlessly. A mode skill is not a manual.
 
 ### 6. Land it
 
