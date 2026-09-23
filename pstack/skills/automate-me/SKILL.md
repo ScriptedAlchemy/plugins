@@ -1,6 +1,6 @@
 ---
 name: automate-me
-description: "Use for \"automate me\", \"create/update/refresh my -mode skill\", \"turn/capture my preferences or working style into a skill\", or wanting agents to follow how the user works. Drafts or revises a personal -mode skill via create-skill + unslop, optionally pulling fresh evidence from recent transcripts."
+description: "Use for \"automate me\", \"create/update/refresh my -mode skill\", \"turn/capture my preferences or working style into a skill\", or wanting agents to follow how the user works. Drafts or revises a personal -mode skill via create-skill + unslop, pulling evidence from this project's transcripts across Cursor, Claude Code, Codex, opencode, and Kimi Code."
 disable-model-invocation: true
 ---
 
@@ -20,15 +20,21 @@ Look recursively for `.cursor/skills/**/*-mode/SKILL.md` and `~/.cursor/skills/*
 - Start fresh (rare, ask why before doing it)
 
 Update mode changes the rest of the flow:
-- Step 1 mines only history since the skill was last edited (`git log -1 --format=%cI <path>`).
+- Step 1 mines only history since the skill was last edited (`git log -1 --format=%cI <path>`, passed to the script as `--since`).
 - Step 2 asks what's changed or missing, not what to capture from zero.
 - Step 4 edits the existing file in place. Preserve sections the user hasn't contradicted. Revise ones with new evidence. Add new sections only for genuinely new rules.
 
 ### 1. Mine their history
 
-Locate the active workspace's transcripts before fanning out. The system prompt names the workspace's `agent-transcripts/` directory. Use only that path. Don't glob across `~/.cursor/projects/*/`. That crosses workspace boundaries and reads private chats from unrelated projects.
+People work through more than one agent tool, and each stores transcripts somewhere different. List every transcript for this project across all of them with the script in this skill's `scripts/`:
 
-Survey recent agent conversations within that scope for recurring patterns. Run multiple parallel subagents across slices of history (e.g. last 2-4 weeks, split into 3 slices so each has enough material). Each slice mining subagent reads transcripts from the workspace-scoped path the parent provides, looks for the signals below, and returns a short structured list of patterns it saw with evidence pointers. Default signals worth hunting:
+```bash
+<this skill dir>/scripts/find-transcripts.sh <project-path> [--since YYYY-MM-DD]
+```
+
+It prints `tool  last-modified  path`, sorted by time, covering Cursor, Claude Code, Codex, opencode (exported from its sqlite store to `$TMPDIR/automate-me/opencode/`), and Kimi Code. It matches on the project path (linked worktrees included) and nothing else. Don't widen it by globbing `~/.cursor/projects/*/`, `~/.claude/projects/*/`, or `~/.codex/sessions/` yourself. That crosses project boundaries and reads private chats from unrelated work. A tool with no rows either isn't installed or has no sessions here. A tool the script doesn't know is added there, as one function, not by ad-hoc path guessing in the chat.
+
+Survey the listed conversations for recurring patterns. Run multiple parallel subagents across slices of the list (e.g. last 2-4 weeks, split into 3 slices by time so each has enough material, each slice mixing tools). Each slice mining subagent reads only the paths the parent hands it, looks for the signals below, and returns a short structured list of patterns it saw with evidence pointers (tool + path + line). Envelopes differ per tool, but every format marks the human's turns with `"role":"user"`, so tell each subagent to `rg` for those lines first and read around them. Default signals worth hunting:
 
 - Response preferences (length, tone, format, "dumb it down" corrections)
 - Delegation habits (subagents, models, specialized workflows, parallelism)
@@ -37,7 +43,7 @@ Survey recent agent conversations within that scope for recurring patterns. Run 
 - Process conventions (worktrees, commits, PRs, review/merge tooling)
 - Meta preferences (fixing skills mid-task, proposing new ones)
 
-Cross-check across slices before elevating a signal. Patterns seen in 2+ slices are high-confidence. Lone signals are weak and usually get dropped.
+Cross-check across slices before elevating a signal. Patterns seen in 2+ slices are high-confidence. Lone signals are weak and usually get dropped. A preference that holds across two tools is stronger than the same count inside one, because it survived a change of interface.
 
 ### 2. Ask the user directly
 
