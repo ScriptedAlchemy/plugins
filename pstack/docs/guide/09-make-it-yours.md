@@ -26,9 +26,9 @@ Update mode mines only the history since the skill last changed. It keeps rules 
 
 Or just `/automate-maintainer` inside a repo, and it ranks that repo's maintainers by merges and reviews and asks which one, or which several, to automate.
 
-Same idea, different subject and different evidence. [`/automate-maintainer`](../../skills/automate-maintainer/SKILL.md) takes a GitHub login and a scope (one repo, an org, or global) and runs its bundled `gh` script to dump that person's PRs, code reviews, issues, and discussions to JSONL. Subagents read one source each and return patterns with URL evidence. Rules that show up across sources become a `.cursor/skills/<login>-maintainer/SKILL.md` an agent can follow to review, triage, or answer the way that maintainer does in that codebase. The persona never posts as the person, and private-repo quotes stay out of skills that land in public repos.
+Same idea, different subject and different evidence. [`/automate-maintainer`](../../skills/automate-maintainer/SKILL.md) takes a GitHub login and a scope (one repo, an org, or global) and uses `gh` to read that person's PRs, code reviews, issues, and discussions. Subagents read one source each and return patterns with URL evidence. Rules that show up across sources become a `.cursor/skills/<login>-mode/SKILL.md` an agent can follow to review, triage, or answer the way that maintainer does in that codebase. The persona never posts as the person, and private-repo quotes stay out of skills that land in public repos.
 
-Unlike a self mode, this one has a test. The script holds back the maintainer's three newest reviews so the draft never sees them. Hand a fresh subagent the drafted skill and one of those PR diffs, then compare its review against the real one. A miss is a rule that's missing or too vague.
+Unlike a self mode, this one has a test. The mining pass holds back the maintainer's activity on the three newest reviewed PRs so the draft never sees them. Hand a fresh subagent the drafted skill and one of those PR diffs, then compare its review against the real one. A miss is a rule that's missing or too vague.
 
 ## Capture a session's lessons with `/reflect`
 
