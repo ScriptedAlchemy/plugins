@@ -26696,6 +26696,7 @@ var __webpack_modules__ = {
                 `${installVerb(result.state, result.mode)} ${result.plugin}@${result.version} for ${result.host}${mode} at ${destination}${content}`
             ];
             if (void 0 !== result.marketplace && ('cursor' === result.host || 'grokbot' === result.host)) lines.push(`Marketplace: ${result.marketplace}${void 0 === result.commit ? '' : ` @ ${result.commit}`}`);
+            if (void 0 !== result.sideload) lines.push('skipped' === result.sideload.state ? `Grok Bot sideload: skipped — ${result.sideload.reason}` : `Grok Bot sideload: ${result.sideload.state} (${result.sideload.repo} @ ${result.sideload.commit}, cache ${result.sideload.slug})`);
             if (void 0 !== result.nextSteps && result.nextSteps.length > 0) {
                 lines.push('Next steps:');
                 lines.push(...result.nextSteps.map((step, index)=>`  ${index + 1}. ${step}`));
@@ -26856,7 +26857,7 @@ var __webpack_modules__ = {
         const registerLifecycleCommands = (program, options)=>{
             const { from: pinned, lifecycle, machine, setExitCode, show } = options;
             const fromOption = (command, help, defaultToCwd = false)=>void 0 === pinned ? command.option('--from <bundle-dir>', help, defaultToCwd ? process.cwd() : void 0) : command;
-            const installCommand = fromOption(program.command('install').description('Install a built bundle into a supported host').argument('<host>', 'Destination host: amp, claude, codex, cursor, or grokbot', installHost), 'Target bundle directory or artifact root', true).option('--scope <scope>', 'Host install scope', installScope, 'user').option('--replace', "Replace an existing agent-bundle install of this plugin even when its version differs; same-version content drift is replaced automatically and foreign installs are always refused").option('--mode <mode>', 'Cursor delivery mode: local (default) or marketplace', installMode).option('--json', 'Write one machine-readable JSON document');
+            const installCommand = fromOption(program.command('install').description('Install a built bundle into a supported host').argument('<host>', 'Destination host: amp, claude, codex, cursor, or grokbot', installHost), 'Target bundle directory or artifact root', true).option('--scope <scope>', 'Host install scope', installScope, 'user').option('--replace', "Replace an existing agent-bundle install of this plugin even when its version differs; same-version content drift is replaced automatically and foreign installs are always refused").option('--mode <mode>', 'Cursor delivery mode: local (default) or marketplace', installMode).option('--no-sideload', 'grokbot: skip sideloading into Grok Bot\'s marketplace clone and plugin cache (also GROK_BOT_SIDELOAD=0)').option('--sideload-repo <owner/repo>', "grokbot: GitHub marketplace whose Grok Bot clone receives the sideload (default scriptedalchemy/plugins; GROK_BOT_SIDELOAD_REPO)").option('--sideload-slug <slug>', 'grokbot: Grok Bot plugin-cache partition for that marketplace (default <owner>-<repo>; GROK_BOT_SIDELOAD_SLUG)').option('--json', 'Write one machine-readable JSON document');
             installCommand.action(async (host, commandOptions)=>{
                 const { installBundle: install } = await lifecycle();
                 const result = await install({
@@ -26866,7 +26867,16 @@ var __webpack_modules__ = {
                     ...void 0 === commandOptions.mode ? {} : {
                         mode: commandOptions.mode
                     },
-                    scope: installScope(commandOptions.scope)
+                    scope: installScope(commandOptions.scope),
+                    ...false === commandOptions.sideload ? {
+                        sideload: false
+                    } : {},
+                    ...void 0 === commandOptions.sideloadRepo ? {} : {
+                        sideloadRepo: commandOptions.sideloadRepo
+                    },
+                    ...void 0 === commandOptions.sideloadSlug ? {} : {
+                        sideloadSlug: commandOptions.sideloadSlug
+                    }
                 });
                 await (true === commandOptions.json ? machine(result) : show(formatInstallResult(result)));
             });
@@ -34594,7 +34604,8 @@ var __webpack_modules__ = {
             'codex-plugin',
             'cursor-local-plugin',
             'cursor-marketplace-staging',
-            'grokbot-marketplace-staging'
+            'grokbot-marketplace-staging',
+            'grokbot-sideload'
         ]);
         const unsupportedEntry = (relativePath)=>new Error(`Refusing unsupported filesystem entry ${JSON.stringify(relativePath || '.')}.`);
         const sortNames = (names)=>[
@@ -34852,6 +34863,39 @@ var __webpack_modules__ = {
                 roots: Object.freeze(roots)
             });
         };
+        const grokBotCommitPattern = /^[0-9a-f]{40}$/u;
+        const grokBotRepoSegmentPattern = /^[a-z0-9_.-]+$/u;
+        const grokBotCacheSegmentPattern = /^[A-Za-z0-9_-]+$/u;
+        const isStrictlyAbove = (root, path)=>path.startsWith(`${root}${node_path__rspack_import_5.sep}`);
+        const isNormalAbsolute = (value)=>'string' == typeof value && (0, node_path__rspack_import_5.isAbsolute)(value) && (0, node_path__rspack_import_5.normalize)(value) === value && !value.endsWith(node_path__rspack_import_5.sep);
+        const readGrokBotSideload = (value, plugin)=>{
+            if (null === value || 'object' != typeof value || Array.isArray(value)) return;
+            const record = value;
+            const { agentData, cachePath, commit, createdDirectories, entry, manifest, pluginPath, repo, slug } = record;
+            if (!grokBotCacheSegmentPattern.test(plugin) || !isNormalAbsolute(agentData) || !isNormalAbsolute(cachePath) || !isNormalAbsolute(manifest) || !isNormalAbsolute(pluginPath) || 'string' != typeof commit || !grokBotCommitPattern.test(commit) || 'string' != typeof slug || !grokBotCacheSegmentPattern.test(slug) || 'string' != typeof repo || !Array.isArray(createdDirectories) || !createdDirectories.every(isNormalAbsolute) || null === entry || 'object' != typeof entry || Array.isArray(entry) || !Object.values(entry).every((field)=>'string' == typeof field) || entry['name'] !== plugin) return;
+            const segments = repo.split('/');
+            if (2 !== segments.length || segments.some((segment)=>!grokBotRepoSegmentPattern.test(segment) || /^\.+$/u.test(segment))) return;
+            const [owner, name] = segments;
+            const cacheRoot = (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'cache');
+            const clone = (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'marketplaces', 'github.com', owner, name, commit);
+            const pluginTail = pluginPath.startsWith(`${clone}${node_path__rspack_import_5.sep}`) ? pluginPath.slice(clone.length + 1).split(node_path__rspack_import_5.sep) : [];
+            if (cachePath !== (0, node_path__rspack_import_5.join)(cacheRoot, slug, plugin, commit) || 0 === pluginTail.length || pluginTail.at(-1) !== plugin || pluginTail.some((segment)=>'' === segment || '.' === segment || '..' === segment || '.git' === segment) || manifest !== (0, node_path__rspack_import_5.join)(clone, '.cursor-plugin', 'marketplace.json') && manifest !== (0, node_path__rspack_import_5.join)(clone, '.claude-plugin', 'marketplace.json') || !createdDirectories.every((directory)=>isStrictlyAbove(directory, cachePath) && directory.startsWith(`${cacheRoot}${node_path__rspack_import_5.sep}`) || isStrictlyAbove(directory, pluginPath) && directory.startsWith(`${clone}${node_path__rspack_import_5.sep}`))) return;
+            return Object.freeze({
+                agentData,
+                cachePath,
+                commit,
+                createdDirectories: Object.freeze([
+                    ...createdDirectories
+                ]),
+                entry: Object.freeze({
+                    ...entry
+                }),
+                manifest,
+                pluginPath,
+                repo,
+                slug
+            });
+        };
         const readRegistration = (value)=>{
             if (null === value || 'object' != typeof value || Array.isArray(value)) return;
             const record = value;
@@ -34878,6 +34922,8 @@ var __webpack_modules__ = {
             if (record['format'] !== installReceiptFormat) return;
             if ('string' != typeof record['plugin'] || 'string' != typeof record['version'] || 'string' != typeof record['host'] || 'string' != typeof record['contentHash'] || 'string' != typeof record['installedAt'] || !isReceiptFileList(record['files']) || !isReceiptFileList(record['directories'])) return;
             const cursorExpansion = readCursorExpansion(record['cursorExpansion']);
+            const grokBotSideload = 'string' == typeof record['plugin'] ? readGrokBotSideload(record['grokBotSideload'], record['plugin']) : void 0;
+            if (void 0 !== record['grokBotSideload'] && void 0 === grokBotSideload) return;
             const state = readReceiptState(record['state']);
             if (void 0 !== record['state'] && void 0 === state) return;
             if (!isReceiptMode(record['mode']) || !isReceiptScope(record['scope']) || 'string' != typeof record['updatedAt'] || !isReceiptFileList(record['hostDirectories']) || !Array.isArray(record['registrations'])) return;
@@ -34900,6 +34946,9 @@ var __webpack_modules__ = {
                     ...record['files']
                 ]),
                 format: installReceiptFormat,
+                ...void 0 === grokBotSideload ? {} : {
+                    grokBotSideload
+                },
                 host: record['host'],
                 hostDirectories: Object.freeze([
                     ...record['hostDirectories']
@@ -34944,6 +34993,17 @@ var __webpack_modules__ = {
                 directories: options.directories ?? directoriesOf(options.inventory.files),
                 files: options.inventory.files,
                 format: installReceiptFormat,
+                ...void 0 === options.grokBotSideload ? {} : {
+                    grokBotSideload: Object.freeze({
+                        ...options.grokBotSideload,
+                        createdDirectories: Object.freeze([
+                            ...options.grokBotSideload.createdDirectories
+                        ]),
+                        entry: Object.freeze({
+                            ...options.grokBotSideload.entry
+                        })
+                    })
+                },
                 host: options.host,
                 hostDirectories: Object.freeze(sortNames(options.hostDirectories ?? [])),
                 installedAt,
@@ -35514,6 +35574,581 @@ var __webpack_modules__ = {
                 });
             }
         };
+        const grokBotAgentDataCandidates = (environment, home)=>Object.freeze([
+                ...void 0 === environment['GROK_BOT_AGENT_DATA_DIR'] || '' === environment['GROK_BOT_AGENT_DATA_DIR'] ? [] : [
+                    environment['GROK_BOT_AGENT_DATA_DIR']
+                ],
+                '/home/box/agent-data',
+                (0, node_path__rspack_import_5.join)(home, '.grokbot', 'agent-data'),
+                (0, node_path__rspack_import_5.join)(home, 'Library', 'Application Support', 'Grok Bot', 'agent-data')
+            ].map((candidate)=>(0, node_path__rspack_import_5.resolve)(candidate)));
+        const directoryExists = async (path)=>{
+            try {
+                return (await (0, node_fs_promises__rspack_import_2.stat)(path)).isDirectory();
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES')) return false;
+                throw error;
+            }
+        };
+        const findGrokBotAgentData = async (environment, home)=>{
+            for (const candidate of grokBotAgentDataCandidates(environment, home))if (await directoryExists((0, node_path__rspack_import_5.join)(candidate, 'plugins'))) return candidate;
+        };
+        const readJsonFile = async (path)=>{
+            try {
+                return JSON.parse(await (0, node_fs_promises__rspack_import_2.readFile)(path, 'utf8'));
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES') || error instanceof SyntaxError) return;
+                throw error;
+            }
+        };
+        const listDirectory = async (path)=>{
+            try {
+                return (await (0, node_fs_promises__rspack_import_2.readdir)(path)).sort();
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES')) return [];
+                throw error;
+            }
+        };
+        const pluginCacheKey = (installPath)=>{
+            const segments = installPath.split(/[\\/]/u).filter((segment)=>'' !== segment);
+            const cache = segments.lastIndexOf('cache');
+            if (cache < 1 || 'plugins' !== segments[cache - 1] || segments.length !== cache + 4) return;
+            return segments.slice(cache + 1).join('/');
+        };
+        const grokBotSideloadMarkerFile = '.agent-bundle-sideload.json';
+        const defaultGrokBotSideloadRepo = "scriptedalchemy/plugins";
+        const cacheCompleteFile = '.cache-complete';
+        const marketplaceManifestPaths = [
+            '.cursor-plugin/marketplace.json',
+            '.claude-plugin/marketplace.json'
+        ];
+        const markerFormat = 'agent-bundle-grokbot-sideload@1';
+        const commitPattern = /^[0-9a-f]{40}$/u;
+        const repoSegmentPattern = /^[a-z0-9_.-]+$/u;
+        const cacheSegmentPattern = /^[A-Za-z0-9_-]+$/u;
+        const grokbot_sideload_failure = (message)=>new _event_ipc_js__rspack_import_17.uo([
+                {
+                    code: 'AB7003',
+                    message,
+                    severity: 'error',
+                    target: 'grokbot'
+                }
+            ]);
+        const disabledValues = new Set([
+            '0',
+            'false',
+            'no',
+            'off'
+        ]);
+        const resolveGrokBotSideloadSettings = (options, environment)=>{
+            const legacy = environment['GROK_BOT_SIDELOAD_MARKETPLACE']?.trim() || void 0;
+            if (legacy?.includes(',') === true && void 0 === options.sideloadRepo && void 0 === environment['GROK_BOT_SIDELOAD_REPO']) throw grokbot_sideload_failure(`GROK_BOT_SIDELOAD_MARKETPLACE ${JSON.stringify(legacy)} names several repositories; set GROK_BOT_SIDELOAD_REPO to one <owner>/<repo>.`);
+            const repo = (options.sideloadRepo ?? environment['GROK_BOT_SIDELOAD_REPO'] ?? legacy ?? defaultGrokBotSideloadRepo).trim().toLowerCase().replace(/^(?:https?:\/\/)?github\.com\//u, '').replace(/(?:\.git)?\/?$/u, '');
+            const segments = repo.split('/');
+            if (2 !== segments.length || segments.some((segment)=>!repoSegmentPattern.test(segment) || /^\.+$/u.test(segment))) throw grokbot_sideload_failure(`Sideload repository ${JSON.stringify(repo)} must be a GitHub <owner>/<repo>.`);
+            const slug = (options.sideloadSlug ?? environment['GROK_BOT_SIDELOAD_SLUG'] ?? segments.join('-')).trim();
+            if (!cacheSegmentPattern.test(slug)) throw grokbot_sideload_failure(`Sideload slug ${JSON.stringify(slug)} may contain only letters, digits, "-", and "_".`);
+            const fromEnvironment = environment['GROK_BOT_SIDELOAD'];
+            const enabled = options.sideload ?? !(void 0 !== fromEnvironment && disabledValues.has(fromEnvironment.trim().toLowerCase()));
+            return Object.freeze({
+                enabled,
+                repo,
+                slug
+            });
+        };
+        const isDirectory = async (path)=>{
+            try {
+                return (await (0, node_fs_promises__rspack_import_2.lstat)(path)).isDirectory();
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR')) return false;
+                throw error;
+            }
+        };
+        const ownsGrokBotSideloadPath = async (path, plugin)=>{
+            if (!await isDirectory(path)) return false;
+            const marker = await readJsonFile((0, node_path__rspack_import_5.join)(path, grokBotSideloadMarkerFile));
+            return effect__rspack_import_34.Gv(marker) && marker['format'] === markerFormat && marker['plugin'] === plugin;
+        };
+        const markerDocument = (plugin)=>`${JSON.stringify({
+                format: markerFormat,
+                plugin
+            }, null, 2)}\n`;
+        const isInside = (root, path)=>{
+            const tail = (0, node_path__rspack_import_5.relative)(root, path);
+            return '' !== tail && !tail.startsWith('..') && !(0, node_path__rspack_import_5.isAbsolute)(tail);
+        };
+        const missingAncestors = async (root, path)=>{
+            const missing = [];
+            for(let current = (0, node_path__rspack_import_5.dirname)(path); isInside(root, current); current = (0, node_path__rspack_import_5.dirname)(current)){
+                if (await (0, _738_1_js__rspack_import_15.t2)(current)) break;
+                missing.unshift(current);
+            }
+            return missing;
+        };
+        const activeClone = async (options)=>{
+            const clones = [];
+            for (const name of (await listDirectory(options.repoRoot)))if (commitPattern.test(name) && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(options.repoRoot, name, '.git'))) clones.push(name);
+            if (1 === clones.length) return {
+                commit: clones[0]
+            };
+            if (0 === clones.length) return {
+                reason: `Grok Bot has no clone of this marketplace under ${options.repoRoot}; install any plugin from it in Grok Bot first, or pass --sideload-repo for the marketplace Grok Bot already cloned.`
+            };
+            const cacheRoot = (0, node_path__rspack_import_5.join)(options.agentData, 'plugins', 'cache', options.slug);
+            const used = new Set();
+            for (const plugin of (await listDirectory(cacheRoot)))if (plugin !== options.plugin) {
+                for (const version of (await listDirectory((0, node_path__rspack_import_5.join)(cacheRoot, plugin))))if (clones.includes(version) && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(cacheRoot, plugin, version, cacheCompleteFile))) used.add(version);
+            }
+            const [only] = used;
+            return 1 === used.size && void 0 !== only ? {
+                commit: only
+            } : {
+                reason: `Grok Bot has ${clones.length} clones under ${options.repoRoot} (${clones.join(', ')}) and none is clearly active; rerun once its plugin sync finishes.`
+            };
+        };
+        const readManifest = async (path)=>{
+            let text;
+            try {
+                text = await (0, node_fs_promises__rspack_import_2.readFile)(path, 'utf8');
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR')) return;
+                throw error;
+            }
+            let document;
+            try {
+                document = JSON.parse(text);
+            } catch  {
+                return;
+            }
+            if (!effect__rspack_import_34.Gv(document) || !Array.isArray(document['plugins'])) return;
+            return {
+                document: document,
+                path,
+                text
+            };
+        };
+        const entryIndex = (manifest, plugin)=>manifest.document.plugins.findIndex((entry)=>effect__rspack_import_34.Gv(entry) && entry['name'] === plugin);
+        const sameEntry = (left, right)=>{
+            if (!effect__rspack_import_34.Gv(left) || void 0 === right) return false;
+            const leftKeys = Object.keys(left).sort();
+            const rightKeys = Object.keys(right).sort();
+            return leftKeys.length === rightKeys.length && leftKeys.every((key, position)=>key === rightKeys[position] && left[key] === right[key]);
+        };
+        const listedEntry = (manifest, plugin)=>manifest.document.plugins[entryIndex(manifest, plugin)];
+        const resolvesInPlace = async (agentData, path)=>{
+            let root;
+            try {
+                root = await (0, node_fs_promises__rspack_import_2.realpath)(agentData);
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR')) return false;
+                throw error;
+            }
+            const tail = (0, node_path__rspack_import_5.relative)(agentData, path);
+            if ('' === tail || tail.startsWith('..') || (0, node_path__rspack_import_5.isAbsolute)(tail)) return false;
+            let expected = root;
+            for (const segment of tail.split(node_path__rspack_import_5.sep)){
+                expected = (0, node_path__rspack_import_5.join)(expected, segment);
+                let actual;
+                try {
+                    actual = await (0, node_fs_promises__rspack_import_2.realpath)(expected);
+                } catch (error) {
+                    if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR')) return true;
+                    throw error;
+                }
+                if (actual !== expected) return false;
+            }
+            return true;
+        };
+        const indentOf = (text)=>/^\{\r?\n([ \t]+)"/u.exec(text)?.[1] ?? '  ';
+        const manifestText = (manifest, plugins)=>`${JSON.stringify({
+                ...manifest.document,
+                plugins
+            }, null, indentOf(manifest.text))}${manifest.text.endsWith('\n') ? '\n' : ''}`;
+        const readText = async (path)=>{
+            try {
+                return await (0, node_fs_promises__rspack_import_2.readFile)(path, 'utf8');
+            } catch (error) {
+                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR')) return;
+                throw error;
+            }
+        };
+        const manifestAttempts = 5;
+        const updateManifest = async (path, update)=>{
+            for(let attempt = 0; attempt < manifestAttempts; attempt += 1){
+                const manifest = await readManifest(path);
+                if (void 0 === manifest) throw grokbot_sideload_failure(`${path} is no longer a readable marketplace manifest; left untouched.`);
+                const plugins = update(manifest);
+                if (void 0 === plugins) return false;
+                const text = manifestText(manifest, plugins);
+                if (text === manifest.text) return false;
+                const mode = 511 & (await (0, node_fs_promises__rspack_import_2.stat)(path)).mode;
+                const temporary = (0, node_path__rspack_import_5.join)((0, node_path__rspack_import_5.dirname)(path), `.${(0, node_path__rspack_import_5.basename)(path)}.${(0, node_crypto__rspack_import_10.randomUUID)()}.tmp`);
+                try {
+                    const handle = await (0, node_fs_promises__rspack_import_2.open)(temporary, 'wx', mode);
+                    try {
+                        await handle.writeFile(text, 'utf8');
+                    } finally{
+                        await handle.close();
+                    }
+                    if (await readText(path) !== manifest.text) continue;
+                    await (0, node_fs_promises__rspack_import_2.rename)(temporary, path);
+                    return true;
+                } finally{
+                    await (0, node_fs_promises__rspack_import_2.rm)(temporary, {
+                        force: true
+                    });
+                }
+            }
+            throw grokbot_sideload_failure(`${path} kept changing while agent-bundle updated it; rerun once Grok Bot's plugin sync settles.`);
+        };
+        const scratchPattern = (destination)=>{
+            const name = (0, node_path__rspack_import_5.basename)(destination).replace(/[$()*+.?[\\\]^{|}]/gu, (character)=>`\\${character}`);
+            return new RegExp(`^\\.${name}\\.agent-bundle-[0-9a-f-]{36}(?:\\.replaced)?$`, 'u');
+        };
+        const removeScratch = async (destination, plugin)=>{
+            const pattern = scratchPattern(destination);
+            for (const name of (await listDirectory((0, node_path__rspack_import_5.dirname)(destination)))){
+                if (!pattern.test(name)) continue;
+                const path = (0, node_path__rspack_import_5.join)((0, node_path__rspack_import_5.dirname)(destination), name);
+                if (!name.endsWith('.replaced') || await ownsGrokBotSideloadPath(path, plugin)) await (0, node_fs_promises__rspack_import_2.rm)(path, {
+                    force: true,
+                    recursive: true
+                });
+                else if (!await (0, _738_1_js__rspack_import_15.t2)(destination)) await (0, node_fs_promises__rspack_import_2.rename)(path, destination);
+            }
+        };
+        const writeTree = async (options)=>{
+            const { destination, plugin } = options;
+            if (!await resolvesInPlace(options.agentData, destination)) throw grokbot_sideload_failure(`${destination} resolves through a symbolic link; sideload refused.`);
+            await (0, node_fs_promises__rspack_import_2.mkdir)((0, node_path__rspack_import_5.dirname)(destination), {
+                recursive: true
+            });
+            await removeScratch(destination, plugin);
+            const stage = (0, node_path__rspack_import_5.join)((0, node_path__rspack_import_5.dirname)(destination), `.${(0, node_path__rspack_import_5.basename)(destination)}.agent-bundle-${(0, node_crypto__rspack_import_10.randomUUID)()}`);
+            const aside = `${stage}.replaced`;
+            const foreign = ()=>grokbot_sideload_failure(`${destination} appeared without agent-bundle's sideload marker while installing; left untouched.`);
+            let asideOwned = false;
+            try {
+                await copyInventoryFiles(options.bundleRoot, stage, options.artifact);
+                await (0, node_fs_promises__rspack_import_2.writeFile)((0, node_path__rspack_import_5.join)(stage, grokBotSideloadMarkerFile), markerDocument(plugin));
+                if (options.cacheComplete) await (0, node_fs_promises__rspack_import_2.writeFile)((0, node_path__rspack_import_5.join)(stage, cacheCompleteFile), '');
+                if (await (0, _738_1_js__rspack_import_15.t2)(destination)) {
+                    if (!await ownsGrokBotSideloadPath(destination, plugin)) throw foreign();
+                    await (0, node_fs_promises__rspack_import_2.rename)(destination, aside);
+                    if (!await ownsGrokBotSideloadPath(aside, plugin)) {
+                        await (0, node_fs_promises__rspack_import_2.rename)(aside, destination);
+                        throw foreign();
+                    }
+                    asideOwned = true;
+                    try {
+                        await (0, node_fs_promises__rspack_import_2.rename)(stage, destination);
+                    } catch (error) {
+                        await (0, node_fs_promises__rspack_import_2.rename)(aside, destination);
+                        throw error;
+                    }
+                } else await (0, node_fs_promises__rspack_import_2.rename)(stage, destination);
+            } finally{
+                await (0, node_fs_promises__rspack_import_2.rm)(stage, {
+                    force: true,
+                    recursive: true
+                });
+                if (asideOwned) await (0, node_fs_promises__rspack_import_2.rm)(aside, {
+                    force: true,
+                    recursive: true
+                });
+            }
+        };
+        const isEmptyDirectory = async (path, removing)=>await isDirectory(path) && (await listDirectory(path)).every((entry)=>removing.has((0, node_path__rspack_import_5.join)(path, entry)));
+        const removeGrokBotSideload = async (record, plugin, options = {})=>{
+            const keep = options.keep ?? new Set();
+            const directories = [];
+            const retained = [];
+            let pluginFolderOurs = true;
+            for (const path of [
+                record.cachePath,
+                record.pluginPath
+            ])if (!keep.has(path)) {
+                if (true !== options.plan && await resolvesInPlace(record.agentData, path)) await removeScratch(path, plugin);
+                if (await (0, _738_1_js__rspack_import_15.t2)(path)) if (await ownsGrokBotSideloadPath(path, plugin) && await resolvesInPlace(record.agentData, path)) {
+                    if (true !== options.plan) await (0, node_fs_promises__rspack_import_2.rm)(path, {
+                        force: true,
+                        recursive: true
+                    });
+                    directories.push(path);
+                } else {
+                    retained.push(path);
+                    if (path === record.pluginPath) pluginFolderOurs = false;
+                }
+            }
+            let manifest;
+            if (!keep.has(record.manifest) && pluginFolderOurs && await resolvesInPlace(record.agentData, record.manifest)) {
+                const document = await readManifest(record.manifest);
+                if (void 0 !== document && sameEntry(listedEntry(document, plugin), record.entry)) {
+                    const removed = true === options.plan || await updateManifest(record.manifest, (latest)=>sameEntry(listedEntry(latest, plugin), record.entry) ? latest.document.plugins.filter((_, position)=>position !== entryIndex(latest, plugin)) : void 0);
+                    if (removed) manifest = record.manifest;
+                    else retained.push(record.manifest);
+                } else if (void 0 !== document && entryIndex(document, plugin) >= 0) retained.push(record.manifest);
+            }
+            const removing = new Set(directories);
+            for (const directory of [
+                ...record.createdDirectories
+            ].reverse())if (!keep.has(directory) && await resolvesInPlace(record.agentData, directory) && await isEmptyDirectory(directory, removing)) {
+                if (true !== options.plan) await (0, node_fs_promises__rspack_import_2.rmdir)(directory).catch(()=>void 0);
+                removing.add(directory);
+                directories.push(directory);
+            }
+            return Object.freeze({
+                directories: Object.freeze(directories),
+                ...void 0 === manifest ? {} : {
+                    manifest
+                },
+                retained: Object.freeze(retained)
+            });
+        };
+        const ownsManifestEntry = (manifest, plugin, previous)=>previous?.manifest === manifest.path && sameEntry(listedEntry(manifest, plugin), previous.entry);
+        const skipped = (reason)=>Object.freeze({
+                reason,
+                state: 'skipped'
+            });
+        const planGrokBotSideload = async (options)=>{
+            const { plugin, previous, settings } = options;
+            if (!settings.enabled) return skipped('disabled by --no-sideload or GROK_BOT_SIDELOAD.');
+            if (!cacheSegmentPattern.test(plugin)) return skipped(`Grok Bot cache paths cannot spell the plugin name ${JSON.stringify(plugin)}.`);
+            const agentData = await findGrokBotAgentData(options.environment, options.home);
+            if (void 0 === agentData) return skipped("no Grok Bot agent-data on this computer (GROK_BOT_AGENT_DATA_DIR, /home/box/agent-data, ~/.grokbot/agent-data, or ~/Library/Application Support/Grok Bot/agent-data).");
+            const [owner, repo] = settings.repo.split('/');
+            const repoRoot = (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'marketplaces', 'github.com', owner, repo);
+            const active = await activeClone({
+                agentData,
+                plugin,
+                repoRoot,
+                slug: settings.slug
+            });
+            if ('reason' in active) return skipped(active.reason);
+            const clone = (0, node_path__rspack_import_5.join)(repoRoot, active.commit);
+            let manifestDocument;
+            for (const path of marketplaceManifestPaths){
+                manifestDocument = await readManifest((0, node_path__rspack_import_5.join)(clone, path));
+                if (void 0 !== manifestDocument) break;
+            }
+            if (void 0 === manifestDocument) return skipped(`the clone ${clone} has no readable marketplace manifest.`);
+            const metadata = manifestDocument.document['metadata'];
+            const pluginRoot = effect__rspack_import_34.Gv(metadata) && 'string' == typeof metadata['pluginRoot'] ? metadata['pluginRoot'] : '';
+            const pluginPath = (0, node_path__rspack_import_5.join)(clone, pluginRoot, plugin);
+            if (!isInside(clone, pluginPath) || (0, node_path__rspack_import_5.relative)(clone, pluginPath).split(node_path__rspack_import_5.sep).includes('.git')) return skipped(`the manifest's pluginRoot ${JSON.stringify(pluginRoot)} leaves the clone ${clone}.`);
+            const ownsPluginPath = await ownsGrokBotSideloadPath(pluginPath, plugin);
+            if (!ownsPluginPath && await (0, _738_1_js__rspack_import_15.t2)(pluginPath)) return skipped(`${pluginPath} already exists and was not written by agent-bundle (Grok Bot's copy or another plugin's); left untouched.`);
+            if (entryIndex(manifestDocument, plugin) >= 0 && !ownsManifestEntry(manifestDocument, plugin, previous)) return skipped(`${manifestDocument.path} already lists a plugin named ${plugin} that agent-bundle did not add; left untouched.`);
+            const cacheRoot = (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'cache');
+            const cachePluginRoot = (0, node_path__rspack_import_5.join)(cacheRoot, settings.slug, plugin);
+            const cachePath = (0, node_path__rspack_import_5.join)(cachePluginRoot, active.commit);
+            for (const path of [
+                manifestDocument.path,
+                pluginPath,
+                cachePath
+            ])if (!await resolvesInPlace(agentData, path)) return skipped(`${path} resolves through a symbolic link; left untouched.`);
+            const stale = [];
+            for (const version of (await listDirectory(cachePluginRoot))){
+                const path = (0, node_path__rspack_import_5.join)(cachePluginRoot, version);
+                if (!version.startsWith('.')) {
+                    if (!await ownsGrokBotSideloadPath(path, plugin)) return skipped(`Grok Bot already has its own copy of ${plugin} at ${path} (an account install); the sideload would shadow it, so it was skipped.`);
+                    if (path !== cachePath) stale.push(path);
+                }
+            }
+            const keptCreated = (previous?.createdDirectories ?? []).filter((directory)=>isInside(directory, cachePath) || isInside(directory, pluginPath));
+            const created = [
+                ...new Set([
+                    ...keptCreated,
+                    ...await missingAncestors(cacheRoot, cachePath),
+                    ...await missingAncestors(clone, pluginPath)
+                ])
+            ];
+            const entry = Object.freeze({
+                name: plugin,
+                source: plugin,
+                ...void 0 === options.description ? {} : {
+                    description: options.description
+                }
+            });
+            return Object.freeze({
+                state: 'ready',
+                target: Object.freeze({
+                    agentData,
+                    cachePath,
+                    commit: active.commit,
+                    createdDirectories: Object.freeze(created),
+                    entry,
+                    manifest: manifestDocument.path,
+                    manifestDocument,
+                    pluginPath,
+                    repo: settings.repo,
+                    slug: settings.slug,
+                    stale: Object.freeze(stale)
+                })
+            });
+        };
+        const grokBotSideloadRecord = (target)=>Object.freeze({
+                agentData: target.agentData,
+                cachePath: target.cachePath,
+                commit: target.commit,
+                createdDirectories: target.createdDirectories,
+                entry: target.entry,
+                manifest: target.manifest,
+                pluginPath: target.pluginPath,
+                repo: target.repo,
+                slug: target.slug
+            });
+        const sameLocation = (left, right)=>left.cachePath === right.cachePath && left.pluginPath === right.pluginPath && left.manifest === right.manifest;
+        const applyGrokBotSideload = async (options)=>{
+            const { artifact, plugin, previous, target } = options;
+            const record = grokBotSideloadRecord(target);
+            const current = await currentManifest(target, plugin, previous);
+            if (void 0 !== previous && sameLocation(previous, record) && sameEntry(previous.entry, record.entry) && options.previousContentHash === artifact.hash && 0 === target.stale.length && await ownsGrokBotSideloadPath(target.pluginPath, plugin) && await ownsGrokBotSideloadPath(target.cachePath, plugin) && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(target.cachePath, cacheCompleteFile)) && sameEntry(listedEntry(current, plugin), record.entry)) return Object.freeze({
+                ...record,
+                state: 'unchanged'
+            });
+            options.progress.started = true;
+            const write = {
+                agentData: target.agentData,
+                artifact,
+                bundleRoot: options.bundleRoot,
+                plugin
+            };
+            await writeTree({
+                ...write,
+                cacheComplete: true,
+                destination: target.cachePath
+            });
+            await writeTree({
+                ...write,
+                cacheComplete: false,
+                destination: target.pluginPath
+            });
+            await updateManifest(target.manifest, (latest)=>{
+                assertEntryOwnable(latest, target, plugin, previous);
+                const plugins = [
+                    ...latest.document.plugins
+                ];
+                const listedAt = entryIndex(latest, plugin);
+                if (listedAt >= 0) plugins[listedAt] = target.entry;
+                else plugins.push(target.entry);
+                return plugins;
+            });
+            return Object.freeze({
+                ...record,
+                state: 'written'
+            });
+        };
+        const currentManifest = async (target, plugin, previous)=>{
+            if (!await resolvesInPlace(target.agentData, target.manifest)) throw grokbot_sideload_failure(`${target.manifest} resolves through a symbolic link; sideload refused.`);
+            const manifest = await readManifest(target.manifest);
+            if (void 0 === manifest) throw grokbot_sideload_failure(`${target.manifest} is no longer a readable marketplace manifest; sideload refused.`);
+            assertEntryOwnable(manifest, target, plugin, previous);
+            return manifest;
+        };
+        const assertEntryOwnable = (manifest, target, plugin, previous)=>{
+            const listed = listedEntry(manifest, plugin);
+            if (void 0 !== listed && !sameEntry(listed, target.entry) && !ownsManifestEntry(manifest, plugin, previous)) throw grokbot_sideload_failure(`${target.manifest} gained a plugin named ${plugin} that agent-bundle did not add; left untouched.`);
+        };
+        const finishGrokBotSideload = async (options)=>{
+            const { plugin, previous, target } = options;
+            for (const path of target.stale)if (await ownsGrokBotSideloadPath(path, plugin) && await resolvesInPlace(target.agentData, path)) await (0, node_fs_promises__rspack_import_2.rm)(path, {
+                force: true,
+                recursive: true
+            });
+            const record = grokBotSideloadRecord(target);
+            if (void 0 !== previous && !sameLocation(previous, record)) await removeGrokBotSideload(previous, plugin, {
+                keep: new Set([
+                    record.cachePath,
+                    record.pluginPath,
+                    record.manifest,
+                    ...record.createdDirectories
+                ])
+            });
+        };
+        const rollbackGrokBotSideload = async (options)=>{
+            const { plugin, previous, target } = options;
+            const record = grokBotSideloadRecord(target);
+            const keep = void 0 === previous || sameLocation(previous, record) ? new Set() : new Set([
+                previous.cachePath,
+                previous.pluginPath,
+                ...previous.createdDirectories
+            ]);
+            await removeGrokBotSideload(record, plugin, {
+                keep
+            });
+        };
+        const inspectGrokBotSideload = async (record, plugin)=>{
+            const index = await readJsonFile((0, node_path__rspack_import_5.join)(record.agentData, 'plugin-skills', 'cache.json'));
+            const key = pluginCacheKey(record.cachePath);
+            const folders = effect__rspack_import_34.Gv(index) && Array.isArray(index['installFolders']) ? index['installFolders'] : [];
+            const manifest = await readManifest(record.manifest);
+            const [owner = '', repo = ''] = record.repo.split('/');
+            return Object.freeze({
+                cacheCopy: await ownsGrokBotSideloadPath(record.cachePath, plugin) && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(record.cachePath, cacheCompleteFile)),
+                cloneActive: await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(record.agentData, 'plugins', 'marketplaces', 'github.com', owner, repo, record.commit, '.git')),
+                listed: void 0 !== manifest && sameEntry(listedEntry(manifest, plugin), record.entry),
+                loaded: void 0 !== key && folders.some((folder)=>effect__rspack_import_34.Gv(folder) && 'string' == typeof folder['installPath'] && pluginCacheKey(folder['installPath']) === key),
+                pluginFolder: await ownsGrokBotSideloadPath(record.pluginPath, plugin)
+            });
+        };
+        const legacyGrokBotSideloadRecordPath = (root, plugin)=>(0, node_path__rspack_import_5.join)(root, 'agent-bundle', 'sideload', `${plugin}.json`);
+        const legacyEntryShape = (entry, plugin)=>effect__rspack_import_34.Gv(entry) && entry['name'] === plugin && entry['source'] === plugin && Object.keys(entry).every((key)=>'name' === key || 'source' === key || "description" === key && 'string' == typeof entry[key]);
+        const holdsPlugin = async (path, plugin)=>{
+            if (!await isDirectory(path)) return false;
+            const manifest = await readJsonFile((0, node_path__rspack_import_5.join)(path, '.cursor-plugin', 'plugin.json'));
+            return effect__rspack_import_34.Gv(manifest) && manifest['name'] === plugin;
+        };
+        const removeLegacyGrokBotSideload = async (root, plugin, options = {})=>{
+            const recordPath = legacyGrokBotSideloadRecordPath(root, plugin);
+            const record = await readJsonFile(recordPath);
+            if (!effect__rspack_import_34.Gv(record) || record['plugin'] !== plugin || !Array.isArray(record['entries'])) return Object.freeze({
+                directories: Object.freeze([]),
+                retained: Object.freeze([])
+            });
+            const directories = [];
+            const retained = [];
+            let manifest;
+            for (const entry of record['entries']){
+                if (!effect__rspack_import_34.Gv(entry)) continue;
+                const { addedEntry, cachePath, commit, marketplace, pluginPath } = entry;
+                if ('string' != typeof cachePath || 'string' != typeof pluginPath || 'string' != typeof commit || 'string' != typeof marketplace || 'boolean' != typeof addedEntry) continue;
+                const segments = marketplace.split('/');
+                if (2 !== segments.length || segments.some((segment)=>!repoSegmentPattern.test(segment) || /^\.+$/u.test(segment))) continue;
+                const [owner, repo] = segments;
+                if (!commitPattern.test(commit) || !(0, node_path__rspack_import_5.isAbsolute)(cachePath) || (0, node_path__rspack_import_5.normalize)(cachePath) !== cachePath) continue;
+                const agentData = (0, node_path__rspack_import_5.dirname)((0, node_path__rspack_import_5.dirname)((0, node_path__rspack_import_5.dirname)((0, node_path__rspack_import_5.dirname)((0, node_path__rspack_import_5.dirname)(cachePath)))));
+                const clone = (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'marketplaces', 'github.com', owner, repo, commit);
+                if (cachePath !== (0, node_path__rspack_import_5.join)(agentData, 'plugins', 'cache', `${owner}-${repo}`, plugin, commit) || pluginPath !== (0, node_path__rspack_import_5.join)(clone, plugin)) continue;
+                for (const path of [
+                    cachePath,
+                    pluginPath
+                ])if (await (0, _738_1_js__rspack_import_15.t2)(path)) if (await holdsPlugin(path, plugin) && await resolvesInPlace(agentData, path)) {
+                    if (true !== options.plan) await (0, node_fs_promises__rspack_import_2.rm)(path, {
+                        force: true,
+                        recursive: true
+                    });
+                    directories.push(path);
+                } else retained.push(path);
+                const manifestPath = (0, node_path__rspack_import_5.join)(clone, '.cursor-plugin', 'marketplace.json');
+                if (true !== addedEntry || !await resolvesInPlace(agentData, manifestPath)) continue;
+                const document = await readManifest(manifestPath);
+                if (void 0 === document || !legacyEntryShape(listedEntry(document, plugin), plugin)) continue;
+                const removed = true === options.plan || await updateManifest(manifestPath, (latest)=>legacyEntryShape(listedEntry(latest, plugin), plugin) ? latest.document.plugins.filter((_, position)=>position !== entryIndex(latest, plugin)) : void 0);
+                if (removed) manifest = manifestPath;
+            }
+            if (true !== options.plan) await (0, node_fs_promises__rspack_import_2.rm)(recordPath, {
+                force: true
+            });
+            return Object.freeze({
+                directories: Object.freeze(directories),
+                ...void 0 === manifest ? {} : {
+                    manifest
+                },
+                record: recordPath,
+                retained: Object.freeze(retained)
+            });
+        };
         const identity_failure = (code, message, target)=>new _event_ipc_js__rspack_import_17.uo([
                 {
                     code,
@@ -35683,6 +36318,11 @@ var __webpack_modules__ = {
             await (0, node_fs_promises__rspack_import_2.rename)(repoRoot, aside);
             return aside;
         };
+        const withoutState = (result)=>{
+            const { state: _state, ...record } = result;
+            return record;
+        };
+        const grokBotSideloadStep = (plugin, sideload)=>`Sideloaded into Grok Bot's ${sideload.repo} marketplace clone @ ${sideload.commit} (${sideload.pluginPath}, listed in ${sideload.manifest}) and its plugin cache (${sideload.cachePath}). Grok Bot loads plugins only from its account plugin listing: until that lists "${plugin}" from ${sideload.slug}, its next plugin sync removes the cache copy, and a new marketplace commit replaces the clone folder. Rerun this install to restore both; \`doctor --host grokbot\` reports which remain.`;
         const installGrokBot = async (options, runner, treeHash)=>{
             if ((options.scope ?? 'user') !== 'user') throw grokbot_failure('AB7003', `Grok Bot plugin installation supports only user scope, not ${options.scope ?? 'user'}.`);
             if (void 0 !== options.mode) throw grokbot_failure('AB7003', `Install mode ${JSON.stringify(options.mode)} applies to the cursor host only.`);
@@ -35695,12 +36335,30 @@ var __webpack_modules__ = {
                 throw error;
             });
             const root = grokBotRoot(options);
+            const environment = options.environment ?? process.env;
+            const settings = resolveGrokBotSideloadSettings(options, environment);
             try {
                 const artifact = await bundleInventory(identity1, {
                     restoreModes: true
                 });
                 const receiptPath = grokBotReceiptPath(root, identity1.plugin);
                 const previousReceipt = await readInstallReceiptFile(receiptPath);
+                const previousSideload = previousReceipt?.plugin === identity1.plugin ? previousReceipt.grokBotSideload : void 0;
+                const manifest = await readJsonFile((0, node_path__rspack_import_5.join)(identity1.bundleRoot, '.cursor-plugin', 'plugin.json'));
+                const description = effect__rspack_import_34.Gv(manifest) && 'string' == typeof manifest["description"] ? manifest["description"] : void 0;
+                const retired = settings.enabled ? await removeLegacyGrokBotSideload(root, identity1.plugin) : void 0;
+                const plan = await planGrokBotSideload({
+                    ...void 0 === description ? {} : {
+                        description
+                    },
+                    environment,
+                    home: options.home ?? (0, node_os__rspack_import_4.homedir)(),
+                    plugin: identity1.plugin,
+                    ...void 0 === previousSideload ? {} : {
+                        previous: previousSideload
+                    },
+                    settings
+                });
                 const repoRoot = (0, node_path__rspack_import_5.join)(grokBotMarketplaceRoot(root), identity1.plugin);
                 const superseded = await supersedeOwnedStaging({
                     artifact,
@@ -35723,8 +36381,29 @@ var __webpack_modules__ = {
                     if (void 0 !== superseded) await (0, node_fs_promises__rspack_import_2.rename)(superseded, repoRoot);
                     throw error;
                 }
+                let sideload;
+                const progress = {
+                    started: false
+                };
                 try {
-                    if ('staged' === staged.state || void 0 === previousReceipt || previousReceipt.contentHash !== artifact.hash || previousReceipt.registrations[0]?.commit !== staged.commit) await writeStoredInstallReceipt(receiptPath, createInstallReceipt({
+                    sideload = 'ready' === plan.state ? await applyGrokBotSideload({
+                        artifact,
+                        bundleRoot: identity1.bundleRoot,
+                        plugin: identity1.plugin,
+                        ...void 0 === previousSideload ? {} : {
+                            previous: previousSideload
+                        },
+                        ...void 0 === previousReceipt ? {} : {
+                            previousContentHash: previousReceipt.contentHash
+                        },
+                        progress,
+                        target: plan.target
+                    }) : plan;
+                    const sideloadRecord = 'skipped' === sideload.state ? previousSideload : withoutState(sideload);
+                    if ('staged' === staged.state || void 0 === previousReceipt || previousReceipt.contentHash !== artifact.hash || previousReceipt.registrations[0]?.commit !== staged.commit || JSON.stringify(previousReceipt.grokBotSideload) !== JSON.stringify(sideloadRecord)) await writeStoredInstallReceipt(receiptPath, createInstallReceipt({
+                        ...void 0 === sideloadRecord ? {} : {
+                            grokBotSideload: sideloadRecord
+                        },
                         host: grokBotHost,
                         ...void 0 === previousReceipt ? {} : {
                             installedAt: previousReceipt.installedAt
@@ -35742,13 +36421,27 @@ var __webpack_modules__ = {
                                 },
                                 kind: 'grokbot-marketplace-staging',
                                 name: staged.marketplace
-                            }
+                            },
+                            ...void 0 === sideloadRecord ? [] : [
+                                {
+                                    commit: sideloadRecord.commit,
+                                    kind: 'grokbot-sideload',
+                                    name: sideloadRecord.slug
+                                }
+                            ]
                         ],
                         scope: 'user',
                         updatedAt: new Date().toISOString(),
                         version: identity1.version
                     }));
                 } catch (error) {
+                    if ('ready' === plan.state && progress.started) await rollbackGrokBotSideload({
+                        plugin: identity1.plugin,
+                        ...void 0 === previousSideload ? {} : {
+                            previous: previousSideload
+                        },
+                        target: plan.target
+                    });
                     if (void 0 !== superseded) {
                         await (0, node_fs_promises__rspack_import_2.rm)(staged.destination, {
                             force: true,
@@ -35762,6 +36455,16 @@ var __webpack_modules__ = {
                     force: true,
                     recursive: true
                 });
+                const cleanup = [];
+                if ('ready' === plan.state && 'written' === sideload.state) await finishGrokBotSideload({
+                    plugin: identity1.plugin,
+                    ...void 0 === previousSideload ? {} : {
+                        previous: previousSideload
+                    },
+                    target: plan.target
+                }).catch((error)=>{
+                    cleanup.push(`Could not remove the superseded Grok Bot sideload copies (${(0, _790_1_js__rspack_import_14.gJ)(error)}); rerun this install to retry.`);
+                });
                 return {
                     bundleRoot: identity1.bundleRoot,
                     ...void 0 === staged.commit ? {} : {
@@ -35772,12 +36475,22 @@ var __webpack_modules__ = {
                     host: grokBotHost,
                     marketplace: staged.marketplace,
                     mode: 'marketplace',
-                    nextSteps: grokBotNextSteps(staged.destination, identity1.plugin),
+                    nextSteps: [
+                        ...'skipped' === sideload.state ? [] : [
+                            grokBotSideloadStep(identity1.plugin, sideload)
+                        ],
+                        ...retired?.record === void 0 ? [] : [
+                            `Retired the earlier sideload record ${retired.record}${0 === retired.directories.length ? '' : ` and removed ${retired.directories.join(', ')}`}${0 === retired.retained.length ? '' : `; kept ${retired.retained.join(', ')} (no longer this plugin's copy)`}.`
+                        ],
+                        ...cleanup,
+                        ...grokBotNextSteps(staged.destination, identity1.plugin)
+                    ],
                     plugin: identity1.plugin,
                     ...void 0 === superseded || void 0 === previousReceipt ? {} : {
                         previousContentHash: previousReceipt.contentHash
                     },
                     receipt: receiptPath,
+                    sideload,
                     state: void 0 === superseded ? staged.state : 'replaced',
                     version: identity1.version
                 };
@@ -35790,38 +36503,6 @@ var __webpack_modules__ = {
                 throw grokbot_failure('AB7004', (0, _790_1_js__rspack_import_14.gJ)(error));
             }
         };
-        const grokBotAgentDataCandidates = (environment, home)=>Object.freeze([
-                ...void 0 === environment['GROK_BOT_AGENT_DATA_DIR'] ? [] : [
-                    environment['GROK_BOT_AGENT_DATA_DIR']
-                ],
-                '/home/box/agent-data',
-                (0, node_path__rspack_import_5.join)(home, '.grokbot', 'agent-data'),
-                (0, node_path__rspack_import_5.join)(home, 'Library', 'Application Support', 'Grok Bot', 'agent-data')
-            ]);
-        const directoryExists = async (path)=>{
-            try {
-                return (await (0, node_fs_promises__rspack_import_2.stat)(path)).isDirectory();
-            } catch (error) {
-                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES')) return false;
-                throw error;
-            }
-        };
-        const readJsonFile = async (path)=>{
-            try {
-                return JSON.parse(await (0, node_fs_promises__rspack_import_2.readFile)(path, 'utf8'));
-            } catch (error) {
-                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES') || error instanceof SyntaxError) return;
-                throw error;
-            }
-        };
-        const listDirectory = async (path)=>{
-            try {
-                return (await (0, node_fs_promises__rspack_import_2.readdir)(path)).sort();
-            } catch (error) {
-                if ((0, _790_1_js__rspack_import_14.r)(error, 'ENOENT') || (0, _790_1_js__rspack_import_14.r)(error, 'ENOTDIR') || (0, _790_1_js__rspack_import_14.r)(error, 'EACCES')) return [];
-                throw error;
-            }
-        };
         const skillIndexIds = (document)=>{
             const ids = new Map();
             if (!effect__rspack_import_34.Gv(document) || !Array.isArray(document['skills'])) return ids;
@@ -35829,20 +36510,13 @@ var __webpack_modules__ = {
                 if (!effect__rspack_import_34.Gv(skill)) continue;
                 const { installPath, pluginId } = skill;
                 if ('string' != typeof installPath || 'string' != typeof pluginId) continue;
-                const segments = installPath.split(/[\\/]/u).filter((segment)=>'' !== segment);
-                const cache = segments.lastIndexOf('cache');
-                if (!(cache < 1) && 'plugins' === segments[cache - 1] && segments.length === cache + 4) ids.set(segments.slice(cache + 1).join('/'), pluginId);
+                const key = pluginCacheKey(installPath);
+                if (void 0 !== key) ids.set(key, pluginId);
             }
             return ids;
         };
         const readGrokBotInventory = async (plugin, options = {})=>{
-            const environment = options.environment ?? process.env;
-            const home = options.home ?? (0, node_os__rspack_import_4.homedir)();
-            let agentData;
-            for (const candidate of grokBotAgentDataCandidates(environment, home))if (await directoryExists((0, node_path__rspack_import_5.join)(candidate, 'plugins'))) {
-                agentData = candidate;
-                break;
-            }
+            const agentData = await findGrokBotAgentData(options.environment ?? process.env, options.home ?? (0, node_os__rspack_import_4.homedir)());
             if (void 0 === agentData) return Object.freeze({
                 reason: 'No Grok Bot plugin cache on this computer (set GROK_BOT_AGENT_DATA_DIR, or run doctor on the Grok Bot computer).',
                 status: 'unavailable'
@@ -35858,7 +36532,7 @@ var __webpack_modules__ = {
                     const manifest = await readJsonFile((0, node_path__rspack_import_5.join)(installPath, '.cursor-plugin', 'plugin.json'));
                     if (!effect__rspack_import_34.Gv(manifest) || manifest['name'] !== plugin) continue;
                     const pluginId = ids.get(`${marketplace}/${plugin}/${version}`);
-                    entries.push(Object.freeze({
+                    if (!(void 0 === pluginId && await ownsGrokBotSideloadPath(installPath, plugin))) entries.push(Object.freeze({
                         installPath,
                         marketplace,
                         ...'string' == typeof manifest['version'] ? {
@@ -36017,7 +36691,7 @@ var __webpack_modules__ = {
                 return (0, node_path__rspack_import_5.join)(await canonicalPath(parent), (0, node_path__rspack_import_5.basename)(path));
             }
         };
-        const markerDocument = (owner)=>`${JSON.stringify({
+        const state_root_markerDocument = (owner)=>`${JSON.stringify({
                 format: 1,
                 owner
             }, null, 2)}\n`;
@@ -36165,7 +36839,7 @@ var __webpack_modules__ = {
                                 created.push(root);
                                 const handle = await (0, node_fs_promises__rspack_import_2.open)(marker, 'wx');
                                 try {
-                                    await handle.writeFile(markerDocument(owner), 'utf8');
+                                    await handle.writeFile(state_root_markerDocument(owner), 'utf8');
                                 } finally{
                                     await handle.close();
                                 }
@@ -37079,6 +37753,7 @@ var __webpack_modules__ = {
             const scope = options.scope ?? 'user';
             if ('grokbot' === options.host) return yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>installGrokBot(options, options.commandRunner ?? defaultCommandRunner, install_treeHash));
             if (void 0 !== options.mode && 'cursor' !== options.host) return yield* effect__rspack_import_29.fJG(identity_failure('AB7003', `Install mode ${JSON.stringify(options.mode)} applies to the cursor host only.`, options.host));
+            if (void 0 !== options.sideload || void 0 !== options.sideloadRepo || void 0 !== options.sideloadSlug) return yield* effect__rspack_import_29.fJG(identity_failure('AB7003', 'Sideload options apply to the grokbot host only.', options.host));
             const host = options.host;
             const identity1 = yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>readBundleIdentity(options.from, host));
             switch(options.host){
@@ -37226,7 +37901,7 @@ var __webpack_modules__ = {
                 mcpServers: servers
             }, null, 2)}\n`;
         };
-        const readText = async (path)=>{
+        const cursor_agent_plugins_launch_readText = async (path)=>{
             if (await cursor_agent_plugins_launch_fileKind(path) !== 'file') return;
             return (0, node_fs_promises__rspack_import_2.readFile)(path, 'utf8');
         };
@@ -37245,7 +37920,7 @@ var __webpack_modules__ = {
                 expansion = void 0;
             }
             const mcpPath = (0, node_path__rspack_import_5.resolve)(pluginRoot, 'mcp.json');
-            const installedText = await readText(mcpPath);
+            const installedText = await cursor_agent_plugins_launch_readText(mcpPath);
             if (void 0 === expansion) {
                 if (void 0 === installedText) return empty();
                 let document;
@@ -39608,6 +40283,26 @@ var __webpack_modules__ = {
                 }
             });
         };
+        const grokBotSideloadDiagnostic = (plugin, sideload)=>{
+            const where = `${sideload.repo} @ ${sideload.commit}, cache ${sideload.slug}`;
+            const missing = [
+                ...sideload.cacheCopy ? [] : [
+                    `the cache copy ${sideload.cachePath} (removed by Grok Bot's plugin sync)`
+                ],
+                ...sideload.cloneActive ? [
+                    ...sideload.pluginFolder ? [] : [
+                        `the clone folder ${sideload.pluginPath}`
+                    ],
+                    ...sideload.listed ? [] : [
+                        `the entry in ${sideload.manifest}`
+                    ]
+                ] : [
+                    `the clone @ ${sideload.commit} (Grok Bot moved the marketplace to a new commit and deleted it)`
+                ]
+            ];
+            if (missing.length > 0) return doctor_diagnostic('AB7335', `${plugin} sideload on grokbot: incomplete (${where}); missing ${missing.join(', ')}${sideload.loaded ? ", though Grok Bot's plugin index still names the cache copy" : ''}.`, 'Rerun `agent-bundle install grokbot` to restore the sideload in the clone Grok Bot is using now.', 'warning', 'grokbot');
+            return sideload.loaded ? doctor_diagnostic('AB7335', `${plugin} sideload on grokbot: loaded — Grok Bot's plugin index names the cache copy ${sideload.cachePath} (${where}).`, 'No action needed.', 'info', 'grokbot') : doctor_diagnostic('AB7335', `${plugin} sideload on grokbot: written (${where}), not loaded. Grok Bot loads only plugins its account plugin listing returns; its next plugin sync (startup, sign-in change, or every 24 hours) removes the cache copy unless the account lists ${plugin} from ${sideload.slug}.`, `For a durable install, publish ${plugin} to ${sideload.repo} and install it from Grok Bot's Marketplace; rerun \`agent-bundle install grokbot\` to restore a pruned sideload.`, 'info', 'grokbot');
+        };
         const doctorGrokBot = async (options, home)=>{
             const environment = options.environment ?? process.env;
             const root = grokBotRoot({
@@ -39615,8 +40310,34 @@ var __webpack_modules__ = {
                 home
             });
             const diagnostics = [];
-            const receipts = await inspectStoreReceipts('grokbot', root, async (receipt)=>'marketplace' === receipt.mode && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(grokBotMarketplaceRoot(root), receipt.plugin)) ? 'consistent' : 'orphaned');
+            const sideloads = new Map();
+            const receipts = await inspectStoreReceipts('grokbot', root, async (receipt)=>{
+                if (void 0 !== receipt.grokBotSideload) sideloads.set(receipt.plugin, receipt.grokBotSideload);
+                return 'marketplace' === receipt.mode && await (0, _738_1_js__rspack_import_15.t2)((0, node_path__rspack_import_5.join)(grokBotMarketplaceRoot(root), receipt.plugin)) ? 'consistent' : 'orphaned';
+            });
             diagnostics.push(...receipts.diagnostics);
+            const receiptFindings = [];
+            for (const finding of receipts.receipts){
+                const record = sideloads.get(finding.plugin);
+                if (void 0 === record) {
+                    receiptFindings.push(finding);
+                    continue;
+                }
+                const sideload = Object.freeze({
+                    ...await inspectGrokBotSideload(record, finding.plugin),
+                    cachePath: record.cachePath,
+                    commit: record.commit,
+                    manifest: record.manifest,
+                    pluginPath: record.pluginPath,
+                    repo: record.repo,
+                    slug: record.slug
+                });
+                receiptFindings.push(Object.freeze({
+                    ...finding,
+                    sideload
+                }));
+                diagnostics.push(grokBotSideloadDiagnostic(finding.plugin, sideload));
+            }
             let identity1;
             let bundleError;
             if (void 0 !== options.from) try {
@@ -39695,7 +40416,7 @@ var __webpack_modules__ = {
                 } : {
                     status: 'unavailable'
                 }),
-                receipts: receipts.receipts,
+                receipts: Object.freeze(receiptFindings),
                 ...void 0 === bundle ? {} : {
                     bundle
                 }
@@ -40189,6 +40910,70 @@ var __webpack_modules__ = {
                 label: 'Grok Bot',
                 root: grokBotRoot(options)
             });
+        const uninstallGrokBot = async (options, identity1, policy)=>{
+            const target = grokBotStagingHost(options, identity1);
+            const receipt = await readInstallReceiptFile(grokBotReceiptPath(target.root, identity1.plugin));
+            const sideload = receipt?.plugin === identity1.plugin ? receipt.grokBotSideload : void 0;
+            const legacy = await (0, _738_1_js__rspack_import_15.t2)(legacyGrokBotSideloadRecordPath(target.root, identity1.plugin));
+            if (void 0 === sideload && !legacy) return uninstallStagedMarketplace(options, identity1, policy, target);
+            const planned = true === options.plan;
+            if (!planned) await uninstallStagedMarketplace({
+                ...options,
+                plan: true
+            }, identity1, policy, target);
+            const removals = [
+                ...void 0 === sideload ? [] : [
+                    await removeGrokBotSideload(sideload, identity1.plugin, {
+                        plan: planned
+                    })
+                ],
+                ...legacy ? [
+                    await removeLegacyGrokBotSideload(target.root, identity1.plugin, {
+                        plan: planned
+                    })
+                ] : []
+            ];
+            const staged = await uninstallStagedMarketplace(options, identity1, policy, target);
+            const directories = removals.flatMap((removal)=>removal.directories);
+            const retained = removals.flatMap((removal)=>removal.retained);
+            const manifests = removals.flatMap((removal)=>void 0 === removal.manifest ? [] : [
+                    removal.manifest
+                ]);
+            const touched = directories.length > 0 || manifests.length > 0;
+            const where = void 0 === sideload ? "Grok Bot's marketplace clone" : `Grok Bot's ${sideload.repo} clone @ ${sideload.commit}`;
+            const detail = [
+                touched ? `${planned ? 'would remove' : 'removed'} the sideload from ${where}${0 === manifests.length ? '' : ` and its entry in ${manifests.join(', ')}`}` : 'nothing sideloaded remains (Grok Bot pruned it, or it was removed by hand)',
+                ...0 === retained.length ? [] : [
+                    `kept ${retained.join(', ')}: no longer this plugin's sideload`
+                ]
+            ].join('; ');
+            return Object.freeze({
+                ...staged,
+                registrations: Object.freeze([
+                    ...staged.registrations,
+                    Object.freeze({
+                        action: touched ? planned ? 'planned' : 'removed' : 'already-absent',
+                        ...void 0 === sideload ? {} : {
+                            commit: sideload.commit
+                        },
+                        detail,
+                        kind: 'grokbot-sideload',
+                        name: sideload?.slug ?? 'legacy-sideload'
+                    })
+                ]),
+                removed: Object.freeze({
+                    directories: Object.freeze([
+                        ...staged.removed.directories,
+                        ...directories
+                    ]),
+                    files: staged.removed.files
+                }),
+                retained: Object.freeze([
+                    ...staged.retained,
+                    ...retained
+                ])
+            });
+        };
         const uninstallStagedMarketplace = async (options, identity1, policy, target)=>{
             const force = true === options.force;
             const marketplace = cursorMarketplaceName(identity1.plugin);
@@ -40831,7 +41616,7 @@ var __webpack_modules__ = {
             if ('grokbot' === options.host) {
                 if ('user' !== scope) return yield* effect__rspack_import_29.fJG(uninstall_failure('AB7003', `Grok Bot plugin uninstallation supports only user scope, not ${scope}.`, 'grokbot'));
                 const cursorIdentity = yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>readBundleIdentity(options.from, 'cursor'));
-                return yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>uninstallStagedMarketplace(options, cursorIdentity, policy, grokBotStagingHost(options, cursorIdentity)));
+                return yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>uninstallGrokBot(options, cursorIdentity, policy));
             }
             const host = options.host;
             const identity1 = yield* (0, _event_ipc_js__rspack_import_17.Z6)(()=>readBundleIdentity(options.from, host));
